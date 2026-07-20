@@ -82,6 +82,41 @@ different directories: the DiT loads, the LM does not, and the failure is a
 warning rather than an error. The checkout is already on the volume, so the
 default path persists regardless.
 
+## Resuming after the pod is stopped
+
+Stopping the pod is the cheap way to idle: you keep paying for the volume
+(~$7/month at 100 GB) but not the GPU. Nothing on `/workspace` is lost, so
+there is no re-download — but the container disk is rebuilt, which takes uv,
+ffmpeg, and the `node` symlink with it.
+
+```bash
+cd /workspace/bootstrap && git pull
+./setup.sh                                  # reinstalls uv; venv already on the volume
+./setup-ui.sh                               # reinstalls ffmpeg and the node symlink
+export UI_USER=admin UI_PASS='<something-long>'
+./start.sh                                  # Gradio  -> port 7860
+# or
+./start-ui.sh                               # ace-step-ui -> port 7860
+```
+
+Both setup scripts are idempotent and take seconds on a resume — they reinstall
+only what the container disk lost. Skip `setup-ui.sh` if you are only using
+Gradio.
+
+The pod ID does not change when you stop and start, so the URL stays
+`https://<POD_ID>-7860.proxy.runpod.net`. Exposed ports are unchanged too.
+Expect a few minutes for the models to load from the volume into VRAM.
+
+If generation fails with `CUDA error: out of memory`, a previous run left
+processes holding VRAM:
+
+```bash
+./stop-ui.sh                                # kills strays, prints VRAM in use
+nvidia-smi --query-gpu=memory.used --format=csv
+```
+
+That should read near zero before you start again.
+
 ## What survives a pod restart
 
 Restarting or editing a pod replaces the container. Anything on the **container
