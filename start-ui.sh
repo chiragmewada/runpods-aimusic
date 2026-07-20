@@ -74,7 +74,11 @@ if curl -sf "http://127.0.0.1:${ACE_PORT}/health" >/dev/null 2>&1; then
 else
     echo "[start-ui] starting ACE-Step on 127.0.0.1:${ACE_PORT} (log: $LOG_DIR/acestep.log)"
     cd "$ACE_DIR"
-    nohup uv run --no-sync acestep \
+    # setsid puts it in its own session, so Ctrl-C on this script does not reach
+    # it. nohup alone is not enough: SIGINT goes to the whole process group, and
+    # a background job in a script shares the script's group. Losing it costs a
+    # multi-minute model reload, which is the thing keeping it warm avoids.
+    setsid nohup uv run --no-sync acestep \
         --port "$ACE_PORT" \
         --server-name 127.0.0.1 \
         --language en \
