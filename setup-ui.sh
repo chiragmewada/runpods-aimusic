@@ -30,7 +30,16 @@ if ! "$NODE_DIR/bin/node" --version &>/dev/null; then
     rm -f "/tmp/$tarball"
 fi
 export PATH="$NODE_DIR/bin:$PATH"
-echo "[setup-ui] node $(node --version), npm $(npm --version)"
+
+# The volume does not reliably preserve the executable bit from the tarball —
+# the node binary survives but npm/npx come through non-executable, failing with
+# "Permission denied". chmod follows the bin/ symlinks to their real targets.
+chmod +x "$NODE_DIR/bin/"* 2>/dev/null || true
+
+# Invoke npm through node rather than its shebang, so setup does not depend on
+# that exec bit at all.
+NPM=("$NODE_DIR/bin/node" "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js")
+echo "[setup-ui] node $(node --version), npm $("${NPM[@]}" --version)"
 
 # ffmpeg lives on the container disk, so it needs reinstalling on each new pod.
 if ! command -v ffmpeg &>/dev/null; then
@@ -47,8 +56,12 @@ else
 fi
 
 echo "[setup-ui] installing npm dependencies (a few minutes)..."
-cd "$UI_DIR" && npm install --no-fund --no-audit
-cd "$UI_DIR/server" && npm install --no-fund --no-audit
+cd "$UI_DIR" && "${NPM[@]}" install --no-fund --no-audit
+cd "$UI_DIR/server" && "${NPM[@]}" install --no-fund --no-audit
+
+# npm writes node_modules/.bin symlinks with the same exec-bit problem, and
+# start-ui.sh runs vite and tsx from there.
+chmod +x "$UI_DIR/node_modules/.bin/"* "$UI_DIR/server/node_modules/.bin/"* 2>/dev/null || true
 
 # A separate Vite config rather than an edit to vite.config.ts, so `git pull`
 # in the UI checkout never conflicts. It imports the upstream config and layers

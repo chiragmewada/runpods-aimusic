@@ -90,7 +90,9 @@ fi
 
 echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-server.log)"
 cd "$UI_DIR/server"
-nohup npx tsx src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
+# node_modules/.bin directly rather than npx: npx re-resolves the package and
+# is another thing that can hit the volume's exec-bit quirk.
+nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 30); do
@@ -108,4 +110,4 @@ echo "[start-ui] frontend on 0.0.0.0:${UI_PORT}"
 echo "  open  https://<POD_ID>-${UI_PORT}.proxy.runpod.net"
 echo
 cd "$UI_DIR"
-npx vite --config vite.config.runpod.ts
+"$UI_DIR/node_modules/.bin/vite" --config vite.config.runpod.ts
