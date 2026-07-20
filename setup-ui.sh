@@ -114,6 +114,26 @@ function basicAuth(user: string, pass: string) {
   };
 }
 
+// The Express backend only accepts an Origin of localhost, a LAN address, or
+// FRONTEND_URL, so requests carrying the proxy origin are rejected with "Not
+// allowed by CORS" — a 500. Browsers omit Origin on same-origin GETs but send
+// it on POSTs, which is why reads worked and writes did not. Dropping the
+// header on the way through takes the backend's own "no origin" path, which it
+// allows explicitly. Vite has already enforced auth and host checks by here.
+function stripOrigin(proxy: Record<string, any>) {
+  return Object.fromEntries(
+    Object.entries(proxy || {}).map(([route, opts]) => [
+      route,
+      {
+        ...(typeof opts === 'string' ? { target: opts, changeOrigin: true } : opts),
+        configure: (p: any) => {
+          p.on('proxyReq', (proxyReq: any) => proxyReq.removeHeader('origin'));
+        },
+      },
+    ])
+  );
+}
+
 export default defineConfig(async (env) => {
   const base: any = typeof baseConfig === 'function' ? await (baseConfig as any)(env) : baseConfig;
   const user = process.env.UI_USER;
@@ -126,6 +146,7 @@ export default defineConfig(async (env) => {
       host: '0.0.0.0',
       port: Number(process.env.UI_PORT || 3000),
       allowedHosts: RUNPOD_HOSTS,
+      proxy: stripOrigin((base.server || {}).proxy),
     },
     // Dependency source maps are useless here and the network volume has been
     // observed truncating some of the thousands of tiny .map files npm writes.
