@@ -3,13 +3,30 @@
 # it deliberately keeps warm between UI restarts.
 set -uo pipefail
 
-stopped=0
-for pattern in "vite --config vite.config.runpod" "tsx src/index.ts" "acestep"; do
-    if pkill -f "$pattern" 2>/dev/null; then
-        echo "[stop-ui] stopped: $pattern"
-        stopped=1
-    fi
-done
+ACE_PORT="${ACE_PORT:-7861}"
+UI_PORT="${UI_PORT:-7860}"
 
-[[ "$stopped" -eq 0 ]] && echo "[stop-ui] nothing was running"
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+# By port, not by command line: tsx and uv both run the real server in a child
+# process whose arguments do not mention them, so pattern matching misses the
+# process actually holding the socket.
+kill_port() {
+    local port="$1" label="$2" pids=""
+    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
+    [[ -z "$pids" ]] && pids=$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$')
+    [[ -z "$pids" ]] && pids=$(lsof -t -i ":$port" 2>/dev/null)
+    if [[ -z "$pids" ]]; then
+        echo "[stop-ui] $label (port $port): not running"
+        return 0
+    fi
+    echo "[stop-ui] stopping $label (port $port): $(echo "$pids" | tr '\n' ' ')"
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+    for _ in $(seq 1 20); do port_open "$port" || return 0; sleep 0.5; done
+    for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
+}
+
+kill_port "$UI_PORT" "frontend"
+kill_port 3001 "backend"
+kill_port "$ACE_PORT" "ACE-Step"
 exit 0

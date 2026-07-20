@@ -50,6 +50,22 @@ trap cleanup EXIT INT TERM
 # what a given endpoint returns.
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
+# Kills by port rather than by command line. tsx runs the server in a child
+# node process whose arguments do not mention tsx, so pattern-matching the
+# command misses the process actually holding the socket.
+kill_port() {
+    local port="$1" pids=""
+    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
+    [[ -z "$pids" ]] && pids=$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$')
+    [[ -z "$pids" ]] && pids=$(lsof -t -i ":$port" 2>/dev/null)
+    [[ -z "$pids" ]] && return 0
+    echo "[start-ui] stopping process(es) on port $port: $(echo "$pids" | tr '\n' ' ')"
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+    for _ in $(seq 1 20); do port_open "$port" || return 0; sleep 0.5; done
+    for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
+    sleep 1
+}
+
 # ACE-Step binds loopback and runs without Gradio auth: @gradio/client cannot
 # authenticate against a protected app, and loopback keeps it off the public
 # proxy regardless of which ports the pod exposes.
@@ -92,38 +108,38 @@ else
     fi
 fi
 
-if port_open 3001; then
-    # Left over from an earlier run that did not shut down cleanly. Reuse it
-    # rather than failing with EADDRINUSE; ./stop-ui.sh clears it.
-    echo "[start-ui] reusing Express backend already running on 3001"
-else
-    echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-server.log)"
-    cd "$UI_DIR/server"
-    # node_modules/.bin directly rather than npx: npx re-resolves the package and
-    # is another thing that can hit the volume's exec-bit quirk.
-    nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
-    server_pid=$!
+# Always restarted, never reused. It starts in seconds, and a survivor from a
+# previous run may predate a dependency reinstall — still running, but with its
+# files replaced underneath it, which shows up as 500s rather than a clean crash.
+kill_port 3001
 
-    ready=0
-    for _ in $(seq 1 30); do
-        if port_open 3001; then ready=1; break; fi
-        if ! kill -0 "$server_pid" 2>/dev/null; then
-            echo "ERROR: Express backend exited. Last 20 lines of $LOG_DIR/ui-server.log:" >&2
-            tail -20 "$LOG_DIR/ui-server.log" >&2
-            exit 1
-        fi
-        sleep 2
-    done
-    if [[ "$ready" -ne 1 ]]; then
-        echo "ERROR: Express backend did not open port 3001. Last 20 lines:" >&2
+echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-server.log)"
+cd "$UI_DIR/server"
+# node_modules/.bin directly rather than npx: npx re-resolves the package and
+# is another thing that can hit the volume's exec-bit quirk.
+nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
+server_pid=$!
+
+ready=0
+for _ in $(seq 1 30); do
+    if port_open 3001; then ready=1; break; fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+        echo "ERROR: Express backend exited. Last 20 lines of $LOG_DIR/ui-server.log:" >&2
         tail -20 "$LOG_DIR/ui-server.log" >&2
         exit 1
     fi
+    sleep 2
+done
+if [[ "$ready" -ne 1 ]]; then
+    echo "ERROR: Express backend did not open port 3001. Last 20 lines:" >&2
+    tail -20 "$LOG_DIR/ui-server.log" >&2
+    exit 1
 fi
 
 echo
 echo "[start-ui] frontend on 0.0.0.0:${UI_PORT}"
 echo "  open  https://<POD_ID>-${UI_PORT}.proxy.runpod.net"
 echo
+kill_port "$UI_PORT"
 cd "$UI_DIR"
 "$UI_DIR/node_modules/.bin/vite" --config vite.config.runpod.ts
