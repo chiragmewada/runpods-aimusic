@@ -94,12 +94,21 @@ kill_port() {
 #
 # WITH_ACESTEP=1 keeps it running. On a 24GB card that will OOM on generation.
 if [[ "${WITH_ACESTEP:-0}" != "1" ]]; then
-    if port_open "$ACE_PORT"; then
-        echo "[start-ui] stopping ACE-Step on ${ACE_PORT} to free VRAM for generation"
-        kill_port "$ACE_PORT"
+    # By port and by command line. An instance that lost the race to bind
+    # ACE_PORT still loads the models and holds the VRAM, so killing only the
+    # listener leaves that memory allocated.
+    kill_port "$ACE_PORT"
+    if pgrep -f "acestep --port" >/dev/null 2>&1; then
+        echo "[start-ui] stopping ACE-Step process(es) to free VRAM for generation"
+        pkill -f "acestep --port" 2>/dev/null || true
+        sleep 3
+        pkill -9 -f "acestep --port" 2>/dev/null || true
     fi
-elif curl -sf "http://127.0.0.1:${ACE_PORT}/health" >/dev/null 2>&1; then
-    echo "[start-ui] reusing ACE-Step already running on ${ACE_PORT}"
+elif pgrep -f "acestep --port" >/dev/null 2>&1; then
+    # Matches on the process, not on /health: an instance still loading its
+    # models does not answer /health yet, and starting a second one gives two
+    # copies of the weights in VRAM with only one able to bind the port.
+    echo "[start-ui] reusing ACE-Step already running (or still loading) on ${ACE_PORT}"
 else
     echo "[start-ui] starting ACE-Step on 127.0.0.1:${ACE_PORT} (log: $LOG_DIR/acestep.log)"
     cd "$ACE_DIR"

@@ -36,4 +36,23 @@ kill_port() {
 kill_port "$UI_PORT" "frontend"
 kill_port 3001 "backend"
 kill_port "$ACE_PORT" "ACE-Step"
+
+# An ACE-Step that lost the race to bind the port still holds its models in
+# VRAM, and killing by port alone never reaches it.
+if pgrep -f "acestep --port" >/dev/null 2>&1; then
+    echo "[stop-ui] stopping stray ACE-Step process(es)"
+    pkill -f "acestep --port" 2>/dev/null || true
+    sleep 3
+    pkill -9 -f "acestep --port" 2>/dev/null || true
+fi
+
+# Generation runs in its own process; an OOM can leave it alive holding VRAM.
+if pgrep -f "simple_generate.py" >/dev/null 2>&1; then
+    echo "[stop-ui] stopping stray generation process(es)"
+    pkill -9 -f "simple_generate.py" 2>/dev/null || true
+fi
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "[stop-ui] VRAM in use: $(nvidia-smi --query-gpu=memory.used --format=csv,noheader 2>/dev/null)"
+fi
 exit 0
