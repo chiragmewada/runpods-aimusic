@@ -67,9 +67,16 @@ music on demand is worth stealing.
 | Path | Holds |
 |---|---|
 | `/workspace/ACE-Step-1.5` | checkout + `.venv` |
-| `/workspace/models` | model weights (`ACESTEP_CHECKPOINTS_DIR`) |
+| `/workspace/ACE-Step-1.5/checkpoints` | model weights |
 | `/workspace/hf-cache` | HuggingFace cache (`HF_HOME`) |
 | `/workspace/uv-cache` | uv package cache (`UV_CACHE_DIR`) |
+
+**Do not set `ACESTEP_CHECKPOINTS_DIR`.** `get_checkpoints_dir()` honours it,
+but the LM loader at `acestep_v15_pipeline.py:546` hardcodes
+`<project_root>/checkpoints` instead. Setting it sends the DiT and the LM to
+different directories: the DiT loads, the LM does not, and the failure is a
+warning rather than an error. The checkout is already on the volume, so the
+default path persists regardless.
 
 ## Known limits
 
@@ -78,6 +85,16 @@ which kills any connection idle for 100s (error 524). Gradio's queue streams
 progress so generation usually survives, but long jobs on a busy GPU can trip
 it. If that happens: expose a TCP port instead of HTTP, or drive the REST API
 (`--enable-api`, port 8001) and poll for results.
+
+**"Unknown LM model: acestep-5Hz-lm-1.7B".** The 1.7B LM is listed in
+`MAIN_MODEL_COMPONENTS` — it ships inside the `ACE-Step/Ace-Step1.5` repo — but
+not in `SUBMODEL_REGISTRY`, so `ensure_lm_model()` cannot fetch it on its own
+and reports it as unknown. It only arrives with the main model download. Only
+`acestep-5Hz-lm-0.6B` and `acestep-5Hz-lm-4B` are separately downloadable.
+
+Without the LM the service still starts and plain generation works, but
+thinking mode, sample mode (generate from description), and CoT
+caption/language detection all fail at request time.
 
 ## Tuning
 

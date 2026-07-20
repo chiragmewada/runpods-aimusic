@@ -19,7 +19,11 @@ if [[ -z "${UI_USER:-}" || -z "${UI_PASS:-}" ]]; then
 fi
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-export ACESTEP_CHECKPOINTS_DIR="$VOL/models"
+# Deliberately NOT setting ACESTEP_CHECKPOINTS_DIR. The LM loader at
+# acestep_v15_pipeline.py:546 hardcodes <project_root>/checkpoints and ignores
+# that variable, so pointing it elsewhere makes the DiT and the LM resolve to
+# different directories and the LM silently fails to load. The checkout already
+# lives on the volume, so the default path persists anyway.
 export HF_HOME="$VOL/hf-cache"
 export UV_CACHE_DIR="$VOL/uv-cache"
 export TOKENIZERS_PARALLELISM=false
