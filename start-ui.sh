@@ -36,7 +36,18 @@ export TOKENIZERS_PARALLELISM=false
 # Both the REST calls and the @gradio/client connection read this one variable,
 # and --enable-api mounts the REST routes onto the Gradio port, so it covers both.
 export ACESTEP_API_URL="http://127.0.0.1:${ACE_PORT}"
+# The backend resolves ACE-Step as <ui>/../../ACE-Step-1.5, i.e. inside the UI
+# checkout, and falls back to env/bin/python when it finds no venv there — hence
+# "spawn .../ace-step-ui/ACE-Step-1.5/env/bin/python ENOENT". Both are
+# overridable, so point them at the real install.
+export ACESTEP_PATH="$ACE_DIR"
+export PYTHON_PATH="$ACE_DIR/.venv/bin/python"
 export UI_PORT
+
+if [[ ! -x "$PYTHON_PATH" ]]; then
+    echo "ERROR: no Python at $PYTHON_PATH. Run ./setup.sh first." >&2
+    exit 1
+fi
 mkdir -p "$LOG_DIR"
 
 # Only the Express backend is stopped on exit. ACE-Step is deliberately left
