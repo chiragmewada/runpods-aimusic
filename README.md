@@ -26,17 +26,21 @@ datacenter as its volume. Roughly $0.07/GB/month, so ~$7/month for 100 GB.
 | Template | RunPod PyTorch (any recent 2.x) |
 | Network volume | the one from step 1, mounted at `/workspace` |
 | Container disk | 20 GB |
-| Expose HTTP Ports | `7860` |
+| Expose HTTP Ports | `7860, 3000` |
 
 ACE-Step scales from <4 GB VRAM to 24 GB+. Below ~6 GB it silently drops into
 DiT-only mode and loses thinking mode, sample mode, and CoT captioning. 24 GB
 keeps everything on and leaves room for the 4B models.
 
+List every port you might want up front. Editing a pod restarts the container,
+which wipes everything outside the network volume, so it is worth avoiding a
+second edit later. The max is 10 and unused ones cost nothing.
+
 **3. Run it** — open the pod's web terminal:
 
 ```bash
-git clone https://github.com/chiragmewada/runpods-aimusic.git /root/bootstrap
-cd /root/bootstrap && chmod +x *.sh
+git clone https://github.com/chiragmewada/runpods-aimusic.git /workspace/bootstrap
+cd /workspace/bootstrap && chmod +x *.sh
 ./setup.sh                                  # ~5-10 min first time, seconds after
 export UI_USER=admin UI_PASS='<something-long>'
 ./start.sh
@@ -77,6 +81,63 @@ but the LM loader at `acestep_v15_pipeline.py:546` hardcodes
 different directories: the DiT loads, the LM does not, and the failure is a
 warning rather than an error. The checkout is already on the volume, so the
 default path persists regardless.
+
+## What survives a pod restart
+
+Restarting or editing a pod replaces the container. Anything on the **container
+disk** (`/root`, `/tmp`, apt packages) is gone; anything on the **network
+volume** (`/workspace`) is not.
+
+| Survives | Does not |
+|---|---|
+| model weights, venv, checkouts, Node, SQLite DB, generated audio | `apt` packages such as ffmpeg, anything under `/root` |
+
+This is why the scripts clone into `/workspace` and install Node to
+`/workspace/node`. Clone this repo to `/workspace/bootstrap`, not `/root`, or
+you will re-clone it after every edit. `setup.sh` and `setup-ui.sh` are both
+idempotent — re-running them after a restart reinstalls only the ephemeral
+pieces and takes seconds.
+
+## Alternative frontend: ace-step-ui
+
+[fspecii/ace-step-ui](https://github.com/fspecii/ace-step-ui) is a Suno-style
+React frontend for ACE-Step 1.5, with a library, stem separation, and an audio
+editor.
+
+```bash
+./setup-ui.sh                               # Node + ffmpeg + npm deps
+export UI_USER=admin UI_PASS='<something-long>'
+./start-ui.sh
+```
+
+Then open `https://<POD_ID>-3000.proxy.runpod.net`.
+
+**Only port 3000 is needed.** Vite proxies `/api`, `/audio`, `/editor`,
+`/blog`, and `/demucs-web` to the Express backend on 3001 server-side, so the
+browser never addresses 3001 directly. ACE-Step is bound to loopback.
+
+Two things `setup-ui.sh` handles that would otherwise break it:
+
+- **`allowedHosts`.** Vite 6 rejects unrecognised `Host` headers, so every
+  request through `*.proxy.runpod.net` would fail with "Blocked request. This
+  host is not allowed."
+- **Auth.** The upstream app assumes localhost and has no real auth — its own
+  config calls the JWT *"for local session, not critical security"*. A basic-auth
+  plugin gates the dev server, covering the proxied backend routes too.
+
+Both live in a generated `vite.config.runpod.ts` that imports the upstream
+config, so `git pull` in the UI checkout never conflicts.
+
+**`start-ui.sh` runs ACE-Step without Gradio auth, bound to `127.0.0.1`.**
+`@gradio/client` cannot authenticate against a password-protected Gradio app,
+so the protection moves to the frontend instead. Loopback keeps 7860 off the
+public proxy no matter which ports the pod exposes. The consequence: while
+`start-ui.sh` is running the Gradio UI is not reachable from a browser. Use
+`start.sh` for that — run one or the other, not both.
+
+`--enable-api` mounts the REST routes onto the Gradio port rather than 8001, so
+one process serves both and the model loads once. Two processes would not fit
+in 24 GB.
 
 ## Known limits
 
