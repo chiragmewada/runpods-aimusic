@@ -46,6 +46,10 @@ server_pid=""
 cleanup() { [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
+# Route-agnostic liveness check: whether anything is listening, without assuming
+# what a given endpoint returns.
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
 # ACE-Step binds loopback and runs without Gradio auth: @gradio/client cannot
 # authenticate against a protected app, and loopback keeps it off the public
 # proxy regardless of which ports the pod exposes.
@@ -88,22 +92,34 @@ else
     fi
 fi
 
-echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-server.log)"
-cd "$UI_DIR/server"
-# node_modules/.bin directly rather than npx: npx re-resolves the package and
-# is another thing that can hit the volume's exec-bit quirk.
-nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
-server_pid=$!
+if port_open 3001; then
+    # Left over from an earlier run that did not shut down cleanly. Reuse it
+    # rather than failing with EADDRINUSE; ./stop-ui.sh clears it.
+    echo "[start-ui] reusing Express backend already running on 3001"
+else
+    echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-server.log)"
+    cd "$UI_DIR/server"
+    # node_modules/.bin directly rather than npx: npx re-resolves the package and
+    # is another thing that can hit the volume's exec-bit quirk.
+    nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
+    server_pid=$!
 
-for _ in $(seq 1 30); do
-    curl -sf "http://127.0.0.1:3001/api/songs" >/dev/null 2>&1 && break
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-        echo "ERROR: Express backend exited. Last 20 lines of $LOG_DIR/ui-server.log:" >&2
+    ready=0
+    for _ in $(seq 1 30); do
+        if port_open 3001; then ready=1; break; fi
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+            echo "ERROR: Express backend exited. Last 20 lines of $LOG_DIR/ui-server.log:" >&2
+            tail -20 "$LOG_DIR/ui-server.log" >&2
+            exit 1
+        fi
+        sleep 2
+    done
+    if [[ "$ready" -ne 1 ]]; then
+        echo "ERROR: Express backend did not open port 3001. Last 20 lines:" >&2
         tail -20 "$LOG_DIR/ui-server.log" >&2
         exit 1
     fi
-    sleep 2
-done
+fi
 
 echo
 echo "[start-ui] frontend on 0.0.0.0:${UI_PORT}"
