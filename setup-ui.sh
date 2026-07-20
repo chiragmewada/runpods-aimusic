@@ -16,10 +16,11 @@ fi
 # Node goes on the volume so new pods reuse it instead of re-downloading.
 if [[ ! -x "$NODE_DIR/bin/node" ]]; then
     echo "[setup-ui] installing Node $NODE_VERSION to $NODE_DIR..."
-    tarball="node-${NODE_VERSION}-linux-x64.tar.xz"
+    # .tar.gz rather than .tar.xz: gzip is always present, xz-utils may not be.
+    tarball="node-${NODE_VERSION}-linux-x64.tar.gz"
     curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${tarball}" -o "/tmp/$tarball"
     mkdir -p "$NODE_DIR"
-    tar -xJf "/tmp/$tarball" -C "$NODE_DIR" --strip-components=1
+    tar -xzf "/tmp/$tarball" -C "$NODE_DIR" --strip-components=1
     rm -f "/tmp/$tarball"
 fi
 export PATH="$NODE_DIR/bin:$PATH"

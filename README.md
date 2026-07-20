@@ -110,7 +110,16 @@ export UI_USER=admin UI_PASS='<something-long>'
 ./start-ui.sh
 ```
 
-Then open `https://<POD_ID>-3000.proxy.runpod.net`.
+Then open `https://<POD_ID>-7860.proxy.runpod.net`.
+
+**No pod edit is needed.** The UI serves on 7860 — already exposed for the
+Gradio setup — and ACE-Step moves to 7861 on loopback, where it does not need
+to be publicly reachable. Editing a pod restarts it, so reusing the port avoids
+that entirely. Override with `UI_PORT` / `ACE_PORT` if you want them elsewhere.
+
+`./stop-ui.sh` stops everything. Re-running `start-ui.sh` reuses a live
+ACE-Step instead of reloading the models, so UI restarts cost seconds rather
+than minutes of GPU time.
 
 **Only port 3000 is needed.** Vite proxies `/api`, `/audio`, `/editor`,
 `/blog`, and `/demucs-web` to the Express backend on 3001 server-side, so the
