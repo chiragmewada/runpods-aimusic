@@ -85,10 +85,20 @@ kill_port() {
     sleep 1
 }
 
-# ACE-Step binds loopback and runs without Gradio auth: @gradio/client cannot
-# authenticate against a protected app, and loopback keeps it off the public
-# proxy regardless of which ports the pod exposes.
-if curl -sf "http://127.0.0.1:${ACE_PORT}/health" >/dev/null 2>&1; then
+# This UI does not generate through the ACE-Step API. Each request spawns
+# server/scripts/simple_generate.py, which imports AceStepHandler and loads the
+# models itself. A warm server on ACE_PORT holds ~20GB of VRAM that the spawned
+# process then cannot allocate, and generation dies with "CUDA error: out of
+# memory". So the server is stopped by default and only its model-list endpoint
+# is lost, which the frontend falls back from.
+#
+# WITH_ACESTEP=1 keeps it running. On a 24GB card that will OOM on generation.
+if [[ "${WITH_ACESTEP:-0}" != "1" ]]; then
+    if port_open "$ACE_PORT"; then
+        echo "[start-ui] stopping ACE-Step on ${ACE_PORT} to free VRAM for generation"
+        kill_port "$ACE_PORT"
+    fi
+elif curl -sf "http://127.0.0.1:${ACE_PORT}/health" >/dev/null 2>&1; then
     echo "[start-ui] reusing ACE-Step already running on ${ACE_PORT}"
 else
     echo "[start-ui] starting ACE-Step on 127.0.0.1:${ACE_PORT} (log: $LOG_DIR/acestep.log)"

@@ -151,7 +151,22 @@ Two things `setup-ui.sh` handles that would otherwise break it:
 Both live in a generated `vite.config.runpod.ts` that imports the upstream
 config, so `git pull` in the UI checkout never conflicts.
 
-**`start-ui.sh` runs ACE-Step without Gradio auth, bound to `127.0.0.1`.**
+**This UI reloads the models on every generation.** It does not generate
+through the ACE-Step API — each request spawns `server/scripts/simple_generate.py`,
+which imports `AceStepHandler` and loads the models itself in a fresh process.
+So expect several minutes per song, every song.
+
+`start.sh` (Gradio) keeps the models resident and generates in seconds after
+the initial load. **For actually producing music, Gradio is the faster tool**;
+this UI is worth it for the library, stem separation, and editor.
+
+Because of that, `start-ui.sh` stops the ACE-Step server rather than keeping it
+warm: a resident server holds ~20GB of VRAM that the spawned process then
+cannot allocate, and generation fails with `CUDA error: out of memory` on a
+24GB card. Only the model-list endpoint is lost, and the frontend falls back
+from it. `WITH_ACESTEP=1` keeps it running, which will OOM on 24GB.
+
+**When it does run ACE-Step, it does so without Gradio auth, bound to `127.0.0.1`.**
 `@gradio/client` cannot authenticate against a password-protected Gradio app,
 so the protection moves to the frontend instead. Loopback keeps 7860 off the
 public proxy no matter which ports the pod exposes. The consequence: while
