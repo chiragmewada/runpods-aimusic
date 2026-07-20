@@ -114,7 +114,21 @@ Then open `https://<POD_ID>-3000.proxy.runpod.net`.
 
 **Only port 3000 is needed.** Vite proxies `/api`, `/audio`, `/editor`,
 `/blog`, and `/demucs-web` to the Express backend on 3001 server-side, so the
-browser never addresses 3001 directly. ACE-Step is bound to loopback.
+browser never addresses 3001 directly. Those cover every path the Express app
+mounts. ACE-Step is bound to loopback, and nothing here uses websockets.
+
+The one exception is stem extraction, which picks its base URL like this:
+
+```js
+const baseUrl = window.location.port === '3000'
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : window.location.origin;
+```
+
+RunPod encodes the port in the hostname, so `window.location.port` is empty,
+the check fails, and it correctly falls back to same-origin. Reaching the UI at
+a literal `localhost:3000` — through an SSH tunnel, say — flips that branch on
+and stem extraction will try to reach 3001 directly. Use the proxy URL.
 
 Two things `setup-ui.sh` handles that would otherwise break it:
 
