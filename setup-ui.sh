@@ -62,7 +62,7 @@ fi
 
 # A Node major bump changes the native ABI, so better-sqlite3 has to be rebuilt
 # against the new one rather than reused.
-if [[ "$node_changed" -eq 1 ]]; then
+if [[ "$node_changed" -eq 1 || "${FORCE_REINSTALL:-0}" == "1" ]]; then
     rm -rf "$UI_DIR/node_modules" "$UI_DIR/server/node_modules"
 fi
 
@@ -120,10 +120,28 @@ export default defineConfig(async (env) => {
       port: Number(process.env.UI_PORT || 3000),
       allowedHosts: RUNPOD_HOSTS,
     },
+    // Dependency source maps are useless here and the network volume has been
+    // observed truncating some of the thousands of tiny .map files npm writes.
+    // esbuild treats a truncated map as a fatal "Unexpected end of file in
+    // source map"; not reading them at all sidesteps the whole class of failure.
+    optimizeDeps: {
+      ...(base.optimizeDeps || {}),
+      esbuildOptions: { ...((base.optimizeDeps || {}).esbuildOptions || {}), sourcemap: false },
+    },
     plugins: [...(base.plugins || []), basicAuth(user, pass)],
   };
 });
 VITECONFIG
+
+# Zero-byte files are a reliable sign npm's writes did not all land. Source maps
+# are already ignored, but truncated JS would fail in less obvious ways.
+empty_js=$(find "$UI_DIR/node_modules" "$UI_DIR/server/node_modules" \
+    -name "*.js" -size 0 2>/dev/null | wc -l)
+if [[ "$empty_js" -gt 0 ]]; then
+    echo
+    echo "WARNING: $empty_js zero-byte .js files under node_modules — the install"
+    echo "  was likely truncated. Re-run with: FORCE_REINSTALL=1 ./setup-ui.sh"
+fi
 
 echo
 echo "[setup-ui] done. Now run: ./start-ui.sh"
