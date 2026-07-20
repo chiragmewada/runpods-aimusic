@@ -14,13 +14,19 @@ if [[ ! -d "$VOL/ACE-Step-1.5" ]]; then
 fi
 
 # Node goes on the volume so new pods reuse it instead of re-downloading.
-if [[ ! -x "$NODE_DIR/bin/node" ]]; then
+if ! "$NODE_DIR/bin/node" --version &>/dev/null; then
+    # Tests by running it, not just for an executable file: a half-extracted
+    # tarball leaves bin/node present but broken.
     echo "[setup-ui] installing Node $NODE_VERSION to $NODE_DIR..."
+    rm -rf "$NODE_DIR"
     # .tar.gz rather than .tar.xz: gzip is always present, xz-utils may not be.
     tarball="node-${NODE_VERSION}-linux-x64.tar.gz"
     curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${tarball}" -o "/tmp/$tarball"
     mkdir -p "$NODE_DIR"
-    tar -xzf "/tmp/$tarball" -C "$NODE_DIR" --strip-components=1
+    # --no-same-owner: the tarball records uid/gid 1001, and restoring that on a
+    # network volume fails with "Cannot change ownership ... Operation not
+    # permitted". Everything here runs as root anyway.
+    tar -xzf "/tmp/$tarball" -C "$NODE_DIR" --strip-components=1 --no-same-owner
     rm -f "/tmp/$tarball"
 fi
 export PATH="$NODE_DIR/bin:$PATH"
