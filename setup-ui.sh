@@ -41,6 +41,13 @@ export PATH="$NODE_DIR/bin:$PATH"
 # "Permission denied". chmod follows the bin/ symlinks to their real targets.
 chmod +x "$NODE_DIR/bin/"* 2>/dev/null || true
 
+# Puts node on the default PATH so #!/usr/bin/env node shebangs resolve in any
+# shell — otherwise running vite or tsx by hand fails with
+# "/usr/bin/env: 'node': No such file or directory".
+ln -sf "$NODE_DIR/bin/node" /usr/local/bin/node 2>/dev/null || true
+ln -sf "$NODE_DIR/bin/npm" /usr/local/bin/npm 2>/dev/null || true
+ln -sf "$NODE_DIR/bin/npx" /usr/local/bin/npx 2>/dev/null || true
+
 # Invoke npm through node rather than its shebang, so setup does not depend on
 # that exec bit at all.
 NPM=("$NODE_DIR/bin/node" "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js")

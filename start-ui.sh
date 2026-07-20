@@ -55,9 +55,17 @@ port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 # command misses the process actually holding the socket.
 kill_port() {
     local port="$1" pids=""
-    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
-    [[ -z "$pids" ]] && pids=$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$')
-    [[ -z "$pids" ]] && pids=$(lsof -t -i ":$port" 2>/dev/null)
+    # Every lookup needs `|| true`. Under `set -e`, an assignment that is the
+    # last command of an && list takes the script down when it fails — and grep
+    # exits 1 whenever the port is free, which is the normal case. That failure
+    # is silent, so the script simply stopped here.
+    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u) || true
+    if [[ -z "$pids" ]]; then
+        pids=$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$') || true
+    fi
+    if [[ -z "$pids" ]]; then
+        pids=$(lsof -t -i ":$port" 2>/dev/null) || true
+    fi
     [[ -z "$pids" ]] && return 0
     echo "[start-ui] stopping process(es) on port $port: $(echo "$pids" | tr '\n' ' ')"
     for pid in $pids; do kill "$pid" 2>/dev/null || true; done
@@ -121,7 +129,8 @@ echo "[start-ui] starting Express backend on 127.0.0.1:3001 (log: $LOG_DIR/ui-se
 cd "$UI_DIR/server"
 # node_modules/.bin directly rather than npx: npx re-resolves the package and
 # is another thing that can hit the volume's exec-bit quirk.
-nohup "$UI_DIR/server/node_modules/.bin/tsx" src/index.ts > "$LOG_DIR/ui-server.log" 2>&1 &
+nohup "$NODE_DIR/bin/node" "$UI_DIR/server/node_modules/tsx/dist/cli.mjs" src/index.ts \
+    > "$LOG_DIR/ui-server.log" 2>&1 &
 server_pid=$!
 
 ready=0
@@ -146,4 +155,6 @@ echo "  open  https://<POD_ID>-${UI_PORT}.proxy.runpod.net"
 echo
 kill_port "$UI_PORT"
 cd "$UI_DIR"
-"$UI_DIR/node_modules/.bin/vite" --config vite.config.runpod.ts
+# Invoked through the node binary rather than the #!/usr/bin/env node shebang,
+# so it does not depend on node being on PATH.
+"$NODE_DIR/bin/node" "$UI_DIR/node_modules/vite/bin/vite.js" --config vite.config.runpod.ts
