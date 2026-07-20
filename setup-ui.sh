@@ -6,7 +6,8 @@ set -euo pipefail
 VOL="${VOL:-/workspace}"
 UI_DIR="$VOL/ace-step-ui"
 NODE_DIR="$VOL/node"
-NODE_VERSION="${NODE_VERSION:-v20.18.1}"
+# v24 LTS: @vitejs/plugin-react needs ^20.19 || >=22.12, and 20.18 missed it.
+NODE_VERSION="${NODE_VERSION:-v24.18.0}"
 
 if [[ ! -d "$VOL/ACE-Step-1.5" ]]; then
     echo "ERROR: $VOL/ACE-Step-1.5 not found. Run ./setup.sh first." >&2
@@ -14,10 +15,14 @@ if [[ ! -d "$VOL/ACE-Step-1.5" ]]; then
 fi
 
 # Node goes on the volume so new pods reuse it instead of re-downloading.
-if ! "$NODE_DIR/bin/node" --version &>/dev/null; then
-    # Tests by running it, not just for an executable file: a half-extracted
-    # tarball leaves bin/node present but broken.
-    echo "[setup-ui] installing Node $NODE_VERSION to $NODE_DIR..."
+# Runs node rather than testing for an executable file, so a half-extracted
+# tarball is replaced instead of being mistaken for a working install. Also
+# reinstalls when the version differs from NODE_VERSION.
+installed_node="$("$NODE_DIR/bin/node" --version 2>/dev/null || true)"
+node_changed=0
+if [[ "$installed_node" != "$NODE_VERSION" ]]; then
+    node_changed=1
+    echo "[setup-ui] installing Node $NODE_VERSION to $NODE_DIR (found: ${installed_node:-none})..."
     rm -rf "$NODE_DIR"
     # .tar.gz rather than .tar.xz: gzip is always present, xz-utils may not be.
     tarball="node-${NODE_VERSION}-linux-x64.tar.gz"
@@ -53,6 +58,12 @@ if [[ -d "$UI_DIR/.git" ]]; then
 else
     echo "[setup-ui] cloning ace-step-ui..."
     git clone https://github.com/fspecii/ace-step-ui.git "$UI_DIR"
+fi
+
+# A Node major bump changes the native ABI, so better-sqlite3 has to be rebuilt
+# against the new one rather than reused.
+if [[ "$node_changed" -eq 1 ]]; then
+    rm -rf "$UI_DIR/node_modules" "$UI_DIR/server/node_modules"
 fi
 
 echo "[setup-ui] installing npm dependencies (a few minutes)..."
